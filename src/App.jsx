@@ -370,7 +370,7 @@ const DEMO_USERS = [
   { email: "admin@raddia.sn", password: "raddia2026", name: "Admin principal", role: "Administrateur" },
 ];
 
-function LoginScreen({ onLogin }) {
+function LoginScreen({ onLogin, onExit }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -398,6 +398,7 @@ function LoginScreen({ onLogin }) {
     <div className="login-root">
       <style>{LOGIN_CSS}</style>
       <div className="login-card">
+        {onExit && <button className="login-back" onClick={onExit}>← Accueil</button>}
         <div className="login-brand">
           <div className="logo">RADDIA</div>
           <div className="logo-sub">SYSTÈME DE CHARGE INTELLIGENT</div>
@@ -435,6 +436,531 @@ const LOGIN_CSS = `
   .login-btn:disabled { opacity: 0.6; cursor: default; }
   .login-btn:not(:disabled):hover { opacity: 0.9; }
   .login-demo { text-align: center; font-size: 10px; color: ${C.dim}; margin-top: 18px; }
+  .login-back { background: none; border: none; color: ${C.muted}; font-family: ${FONT}; font-size: 10px; cursor: pointer; margin-bottom: 18px; letter-spacing: 0.5px; }
+  .login-back:hover { color: ${C.text}; }
+`;
+
+/* ==================== PARTIE 9 — ÉCRAN DE LANCEMENT ==================== */
+/* ============================================================
+   RADDIA — PARTIE 9 : ÉCRAN DE LANCEMENT
+   Premier écran vu par TOUT LE MONDE, avant même la connexion.
+   Deux chemins bien distincts :
+     - Gestionnaire -> écran de connexion (partie 8) -> app existante
+     - Utilisateur  -> flux de charge sans compte (parties 10-12, à venir)
+   ============================================================ */
+
+// props :
+//  - onSelect : appelé avec "gestionnaire" ou "utilisateur"
+function AppModeSelect({ onSelect }) {
+  return (
+    <div className="mode-root">
+      <style>{MODE_CSS}</style>
+
+      <div className="mode-brand">
+        <div className="logo">RADDIA</div>
+        <div className="logo-sub">SYSTÈME DE CHARGE INTELLIGENT</div>
+      </div>
+
+      <div className="mode-cards">
+        <button className="mode-card mode-card--user" onClick={() => onSelect("utilisateur")}>
+          <div className="mode-icon">🔋</div>
+          <div className="mode-title">Charger mon téléphone</div>
+          <div className="mode-desc">Scannez le QR code d'un casier pour démarrer — sans compte, sans inscription.</div>
+          <div className="mode-cta mode-cta--green">COMMENCER →</div>
+        </button>
+
+        <button className="mode-card mode-card--admin" onClick={() => onSelect("gestionnaire")}>
+          <div className="mode-icon">⊞</div>
+          <div className="mode-title">Espace gestionnaire</div>
+          <div className="mode-desc">Pilotez vos bornes à distance : casiers, alertes, statistiques.</div>
+          <div className="mode-cta mode-cta--muted">SE CONNECTER →</div>
+        </button>
+      </div>
+
+      <div className="mode-footer">RADDIA · Dakar, Sénégal</div>
+    </div>
+  );
+}
+
+/* ---------- STYLES ---------- */
+const MODE_CSS = `
+  .mode-root {
+    font-family: ${FONT}; background: ${C.bg}; color: ${C.text};
+    min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; padding: 24px;
+  }
+  .mode-brand { text-align: center; margin-bottom: 40px; }
+  .mode-brand .logo { font-size: 30px; font-weight: 800; letter-spacing: 7px; color: ${C.green}; }
+  .mode-brand .logo-sub { font-size: 9px; color: ${C.muted}; letter-spacing: 3px; margin-top: 6px; }
+
+  .mode-cards { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 380px; }
+  .mode-card {
+    background: ${C.surface}; border: 1px solid ${C.border}; border-radius: 18px;
+    padding: 26px 22px; text-align: left; cursor: pointer; font-family: ${FONT};
+    transition: transform .15s, border-color .15s;
+  }
+  .mode-card:hover { transform: translateY(-2px); }
+  .mode-card--user:hover { border-color: ${C.green}66; }
+  .mode-card--admin:hover { border-color: ${C.blue}66; }
+  .mode-icon { font-size: 28px; margin-bottom: 10px; }
+  .mode-title { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+  .mode-desc { font-size: 12px; color: ${C.muted}; line-height: 1.5; margin-bottom: 16px; }
+  .mode-cta { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; }
+  .mode-cta--green { color: ${C.green}; }
+  .mode-cta--muted { color: ${C.muted}; }
+
+  .mode-footer { margin-top: 32px; font-size: 9px; color: ${C.dim}; letter-spacing: 1px; }
+
+  @media (min-width: 700px) {
+    .mode-cards { flex-direction: row; max-width: 640px; }
+    .mode-card { flex: 1; }
+  }
+`;
+
+/* ==================== PARTIE 10 — SCAN QR ==================== */
+/* ============================================================
+   RADDIA — PARTIE 10 : SCAN QR (VRAIE CAMÉRA)
+   Flux utilisateur — première étape : associer un client à un casier
+   ============================================================ */
+
+/* ---------- FORMAT DU QR CODE (contrat à partager avec l'équipe hardware) ---------- */
+// Contenu attendu sur l'autocollant QR de chaque casier physique :
+//   RADDIA:<ID_BORNE>:<NUMERO_CASIER>
+//   Exemple : RADDIA:DKR-01:23
+function parseQRPayload(text) {
+  const match = /^RADDIA:([A-Z0-9-]+):(\d+)$/.exec(text.trim());
+  if (!match) return null;
+  return { borneId: match[1], slotId: parseInt(match[2], 10) };
+}
+
+/* ---------- COMPOSANT PRINCIPAL ---------- */
+// props :
+//  - onScanned : appelé avec { borneId, slotId } une fois un QR valide détecté
+//  - onBack    : retour à l'écran précédent
+function QRScanner({ onScanned, onBack }) {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const rafRef = useRef(null);
+  const [status, setStatus] = useState("init"); // init | scanning | denied | unsupported
+  const [jsQRReady, setJsQRReady] = useState(!!window.jsQR);
+  const [showDemoQR, setShowDemoQR] = useState(false);
+
+  // QR de démo — même contenu que le bouton de simulation, généré via une API publique
+  // (pas de bibliothèque supplémentaire à charger juste pour l'affichage)
+  const DEMO_PAYLOAD = "RADDIA:DKR-01:23";
+  const demoQRUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=12&data=${encodeURIComponent(DEMO_PAYLOAD)}`;
+
+  /* Charge la bibliothèque de décodage QR depuis un CDN (pas de build nécessaire) */
+  useEffect(() => {
+    if (window.jsQR) { setJsQRReady(true); return; }
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.js";
+    script.onload = () => setJsQRReady(true);
+    script.onerror = () => setStatus("unsupported");
+    document.head.appendChild(script);
+    return () => { document.head.removeChild(script); };
+  }, []);
+
+  /* Démarre la caméra dès que jsQR est prêt */
+  useEffect(() => {
+    if (!jsQRReady) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setStatus("unsupported");
+      return;
+    }
+    let cancelled = false;
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: "environment" } })
+      .then((stream) => {
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+        }
+        setStatus("scanning");
+      })
+      .catch(() => setStatus("denied"));
+
+    return () => {
+      cancelled = true;
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [jsQRReady]);
+
+  /* Boucle de scan : lit chaque image de la vidéo et cherche un QR code dedans */
+  useEffect(() => {
+    if (status !== "scanning") return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+    function tick() {
+      const video = videoRef.current;
+      if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = window.jsQR(imageData.data, imageData.width, imageData.height);
+        if (code) {
+          const parsed = parseQRPayload(code.data);
+          if (parsed) {
+            onScanned(parsed);
+            return; // on arrête la boucle, un résultat valide a été trouvé
+          }
+        }
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    }
+    rafRef.current = requestAnimationFrame(tick);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [status, onScanned]);
+
+  return (
+    <div className="scan-root">
+      <style>{SCAN_CSS}</style>
+
+      <div className="scan-topbar">
+        <button className="scan-back" onClick={onBack}>← Retour</button>
+        <div className="scan-title">SCANNER LE CASIER</div>
+        <div style={{ width: 60 }} />
+      </div>
+
+      <div className="scan-view">
+        <video ref={videoRef} className="scan-video" playsInline muted />
+        <canvas ref={canvasRef} style={{ display: "none" }} />
+
+        {status === "scanning" && (
+          <div className="scan-frame">
+            <div className="scan-corner tl" /><div className="scan-corner tr" />
+            <div className="scan-corner bl" /><div className="scan-corner br" />
+            <div className="scan-laser" />
+          </div>
+        )}
+
+        {(status === "init") && (
+          <div className="scan-overlay-msg">Initialisation de la caméra…</div>
+        )}
+        {status === "denied" && (
+          <div className="scan-overlay-msg">
+            Accès à la caméra refusé.<br />Autorisez la caméra dans les réglages de votre navigateur, ou utilisez la simulation ci-dessous.
+          </div>
+        )}
+        {status === "unsupported" && (
+          <div className="scan-overlay-msg">
+            Caméra non disponible dans cet environnement.<br />Utilisez la simulation ci-dessous, ou ouvrez l'app déployée sur votre téléphone.
+          </div>
+        )}
+      </div>
+
+      <div className="scan-hint">
+        {status === "scanning" ? "Visez le QR code affiché sur le casier" : "En attente de la caméra…"}
+      </div>
+
+      {/* Repli toujours disponible : utile en test, ou si la caméra ne fonctionne pas */}
+      <button className="scan-fallback" onClick={() => onScanned({ borneId: "DKR-01", slotId: 23 })}>
+        Simuler le scan (casier DKR-01 · #23)
+      </button>
+
+      {/* Aide au test : afficher un QR à scanner avec un autre appareil */}
+      <button className="scan-demo-link" onClick={() => setShowDemoQR(true)}>
+        📱 Afficher un QR de démo à scanner (depuis un autre écran)
+      </button>
+
+      {showDemoQR && (
+        <div className="scan-demo-overlay" onClick={() => setShowDemoQR(false)}>
+          <div className="scan-demo-card" onClick={(e) => e.stopPropagation()}>
+            <div className="scan-demo-title">QR DE DÉMO — CASIER DKR-01 #23</div>
+            <img src={demoQRUrl} alt="QR code de démonstration RADDIA" className="scan-demo-img" />
+            <div className="scan-demo-desc">
+              Affichez cet écran sur un ordinateur, puis scannez-le avec la caméra de votre téléphone (sur l'app déployée).
+            </div>
+            <button className="scan-demo-close" onClick={() => setShowDemoQR(false)}>Fermer</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- STYLES ---------- */
+const SCAN_CSS = `
+  .scan-root { font-family: ${FONT}; background: #000; color: ${C.text}; min-height: 100vh; display: flex; flex-direction: column; }
+  .scan-topbar { display: flex; align-items: center; justify-content: space-between; padding: 16px; }
+  .scan-back { background: none; border: none; color: ${C.text}; font-family: ${FONT}; font-size: 12px; cursor: pointer; }
+  .scan-title { font-size: 11px; letter-spacing: 2px; color: ${C.muted}; }
+
+  .scan-view { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #050505; }
+  .scan-video { width: 100%; height: 100%; object-fit: cover; }
+
+  .scan-frame { position: absolute; width: 62vw; max-width: 260px; aspect-ratio: 1; }
+  .scan-corner { position: absolute; width: 26px; height: 26px; border: 3px solid ${C.green}; }
+  .scan-corner.tl { top: 0; left: 0; border-right: none; border-bottom: none; }
+  .scan-corner.tr { top: 0; right: 0; border-left: none; border-bottom: none; }
+  .scan-corner.bl { bottom: 0; left: 0; border-right: none; border-top: none; }
+  .scan-corner.br { bottom: 0; right: 0; border-left: none; border-top: none; }
+  .scan-laser { position: absolute; left: 4%; right: 4%; height: 2px; background: ${C.green}; box-shadow: 0 0 8px ${C.green}; animation: laserMove 2s ease-in-out infinite; }
+  @keyframes laserMove { 0%,100% { top: 6%; } 50% { top: 92%; } }
+
+  .scan-overlay-msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 30px; font-size: 12px; color: ${C.muted}; line-height: 1.6; background: rgba(0,0,0,0.6); }
+
+  .scan-hint { text-align: center; font-size: 11px; color: ${C.muted}; padding: 16px; letter-spacing: 0.5px; }
+  .scan-fallback {
+    margin: 0 16px 20px; padding: 12px; border-radius: 10px; border: 1px dashed ${C.border};
+    background: none; color: ${C.dim}; font-family: ${FONT}; font-size: 10px; letter-spacing: 0.5px; cursor: pointer;
+  }
+  .scan-fallback:hover { border-color: ${C.muted}; color: ${C.muted}; }
+
+  .scan-demo-link {
+    margin: 0 16px 20px; padding: 10px; border-radius: 10px; border: none;
+    background: none; color: ${C.green}; font-family: ${FONT}; font-size: 10px; letter-spacing: 0.5px; cursor: pointer;
+    opacity: 0.85;
+  }
+  .scan-demo-link:hover { opacity: 1; }
+
+  .scan-demo-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center; z-index: 300; padding: 20px;
+  }
+  .scan-demo-card {
+    background: ${C.surface}; border: 1px solid ${C.border}; border-radius: 16px;
+    padding: 24px; text-align: center; max-width: 320px;
+  }
+  .scan-demo-title { font-size: 10px; letter-spacing: 1.5px; color: ${C.muted}; margin-bottom: 16px; }
+  .scan-demo-img { width: 100%; max-width: 220px; border-radius: 10px; background: #fff; padding: 10px; }
+  .scan-demo-desc { font-size: 11px; color: ${C.muted}; line-height: 1.6; margin-top: 16px; }
+  .scan-demo-close {
+    margin-top: 18px; width: 100%; padding: 11px; border-radius: 8px; border: 1px solid ${C.border};
+    background: none; color: ${C.text}; font-family: ${FONT}; font-size: 11px; letter-spacing: 1px; cursor: pointer;
+  }
+`;
+
+/* ==================== PARTIE 11 — SUIVI DE CHARGE ==================== */
+/* ============================================================
+   RADDIA — PARTIE 11 : SUIVI DE CHARGE EN DIRECT
+   Écran que le client garde ouvert (ou revient consulter)
+   pendant que son téléphone charge dans le casier.
+   ============================================================ */
+
+// props :
+//  - borneId, slotId : identifient le casier (viennent du scan, partie 10)
+//  - onRetrieve       : appelé quand le client clique "Récupérer mon téléphone"
+function ChargeTracking({ borneId, slotId, onRetrieve }) {
+  const [battery, setBattery] = useState(4);
+  const [notifGranted, setNotifGranted] = useState(false);
+  const notifiedRef = useRef(false); // évite de notifier plusieurs fois
+
+  const status = battery >= 100 ? "ready" : "charging";
+
+  // ⏱️ Simulation accélérée pour la démo (charge complète en ~45s au lieu de ~90min réelles).
+  // Pour un rythme réaliste en test prolongé, réduire l'incrément (ex: 0.02 au lieu de 2.2).
+  useEffect(() => {
+    if (status === "ready") return;
+    const t = setInterval(() => {
+      setBattery((b) => Math.min(100, b + 2.2 + Math.random() * 1.5));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [status]);
+
+  // Notification navigateur quand la charge est terminée (si autorisée)
+  useEffect(() => {
+    if (status === "ready" && notifGranted && !notifiedRef.current && "Notification" in window) {
+      notifiedRef.current = true;
+      new Notification("RADDIA — Téléphone prêt 🔋", {
+        body: `Casier ${String(slotId).padStart(3, "0")} : charge complète, vous pouvez le récupérer.`,
+      });
+    }
+  }, [status, notifGranted, slotId]);
+
+  function askNotifPermission() {
+    if (!("Notification" in window)) return;
+    Notification.requestPermission().then((perm) => setNotifGranted(perm === "granted"));
+  }
+
+  // Géométrie de l'anneau de progression (SVG)
+  const R = 88;
+  const CIRC = 2 * Math.PI * R;
+  const offset = CIRC - (Math.min(battery, 100) / 100) * CIRC;
+  const ringColor = status === "ready" ? C.green : C.amber;
+  const estMinutes = Math.max(0, Math.round((100 - battery) * 0.9));
+
+  return (
+    <div className="track-root">
+      <style>{TRACK_CSS}</style>
+
+      <div className="track-header">
+        <div className="track-eyebrow">CASIER {String(slotId).padStart(3, "0")}</div>
+        <div className="track-borne">{borneId}</div>
+      </div>
+
+      <div className="track-ring-wrap">
+        <svg viewBox="0 0 200 200" className="track-ring">
+          <circle cx="100" cy="100" r={R} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="12" />
+          <circle
+            cx="100" cy="100" r={R} fill="none" stroke={ringColor} strokeWidth="12" strokeLinecap="round"
+            strokeDasharray={CIRC} strokeDashoffset={offset}
+            transform="rotate(-90 100 100)" style={{ transition: "stroke-dashoffset 1s linear, stroke .3s" }}
+          />
+        </svg>
+        <div className="track-ring-center">
+          <div className="track-pct" style={{ color: ringColor }}>{Math.round(battery)}%</div>
+          <div className="track-pct-label">{status === "ready" ? "PRÊT" : "EN CHARGE"}</div>
+        </div>
+      </div>
+
+      {status === "charging" ? (
+        <>
+          <div className="track-eta">Prêt dans environ <strong>{estMinutes} min</strong></div>
+          {!notifGranted && "Notification" in window && (
+            <button className="track-notif-btn" onClick={askNotifPermission}>
+              🔔 Me prévenir quand c'est prêt
+            </button>
+          )}
+          <div className="track-note">Vous pouvez fermer cet écran — votre téléphone continue de charger normalement dans le casier.</div>
+        </>
+      ) : (
+        <>
+          <div className="track-ready-banner">✓ Votre téléphone est chargé à 100%</div>
+          <button className="track-retrieve-btn" onClick={onRetrieve}>
+            🔓 RÉCUPÉRER MON TÉLÉPHONE
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---------- STYLES ---------- */
+const TRACK_CSS = `
+  .track-root {
+    font-family: ${FONT}; background: ${C.bg}; color: ${C.text}; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px;
+  }
+  .track-header { text-align: center; margin-bottom: 28px; }
+  .track-eyebrow { font-size: 11px; letter-spacing: 2px; color: ${C.muted}; }
+  .track-borne { font-size: 13px; font-weight: 700; color: ${C.text}; margin-top: 4px; }
+
+  .track-ring-wrap { position: relative; width: 220px; height: 220px; margin-bottom: 28px; }
+  .track-ring { width: 100%; height: 100%; }
+  .track-ring-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .track-pct { font-size: 36px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+  .track-pct-label { font-size: 10px; letter-spacing: 2px; color: ${C.muted}; margin-top: 6px; }
+
+  .track-eta { font-size: 14px; color: ${C.text}; margin-bottom: 18px; }
+  .track-eta strong { color: ${C.amber}; }
+
+  .track-notif-btn {
+    background: rgba(255,255,255,0.04); border: 1px solid ${C.border}; color: ${C.text};
+    padding: 11px 20px; border-radius: 24px; font-family: ${FONT}; font-size: 11px;
+    letter-spacing: 0.5px; cursor: pointer; margin-bottom: 20px;
+  }
+  .track-notif-btn:hover { border-color: ${C.green}66; }
+
+  .track-note { font-size: 11px; color: ${C.dim}; text-align: center; max-width: 260px; line-height: 1.6; }
+
+  .track-ready-banner {
+    background: rgba(16,185,129,0.1); border: 1px solid ${C.green}55; color: ${C.green};
+    padding: 12px 20px; border-radius: 12px; font-size: 13px; font-weight: 700; margin-bottom: 22px;
+    animation: readyPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes readyPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+
+  .track-retrieve-btn {
+    background: ${C.green}; color: #07070f; border: none; padding: 16px 28px; border-radius: 14px;
+    font-family: ${FONT}; font-size: 13px; font-weight: 800; letter-spacing: 1px; cursor: pointer;
+    box-shadow: 0 0 24px ${C.green}44;
+  }
+  .track-retrieve-btn:hover { opacity: 0.92; }
+`;
+
+/* ==================== PARTIE 12 — RÉCUPÉRATION ==================== */
+/* ============================================================
+   RADDIA — PARTIE 12 : RÉCUPÉRATION
+   Dernière étape du parcours client : déverrouillage physique
+   du casier, confirmation, puis retour à l'écran de lancement.
+   ============================================================ */
+
+// props :
+//  - slotId    : numéro du casier
+//  - onFinish  : appelé quand le client a terminé (retour à l'écran de lancement, partie 9)
+function Retrieval({ slotId, onFinish }) {
+  // "unlocking" -> le signal est envoyé au casier (simulation d'un appel au contrôleur physique)
+  // "unlocked"  -> le casier est ouvert, en attente que le client confirme avoir repris son tél.
+  const [step, setStep] = useState("unlocking");
+
+  useEffect(() => {
+    if (step !== "unlocking") return;
+    // Simule le temps de communication avec le contrôleur du casier (MQTT -> relais physique)
+    const t = setTimeout(() => setStep("unlocked"), 1400);
+    return () => clearTimeout(t);
+  }, [step]);
+
+  return (
+    <div className="retr-root">
+      <style>{RETR_CSS}</style>
+
+      {step === "unlocking" && (
+        <>
+          <div className="retr-spinner" />
+          <div className="retr-title">Déverrouillage du casier {String(slotId).padStart(3, "0")}…</div>
+          <div className="retr-sub">Un instant, le casier s'ouvre.</div>
+        </>
+      )}
+
+      {step === "unlocked" && (
+        <>
+          <div className="retr-icon">🔓</div>
+          <div className="retr-title">Casier ouvert</div>
+          <div className="retr-sub">Récupérez votre téléphone, puis refermez le casier.</div>
+          <button className="retr-btn" onClick={() => setStep("done")}>
+            J'AI RÉCUPÉRÉ MON TÉLÉPHONE
+          </button>
+        </>
+      )}
+
+      {step === "done" && (
+        <>
+          <div className="retr-icon">✓</div>
+          <div className="retr-title">Merci d'avoir utilisé RADDIA</div>
+          <div className="retr-sub">À bientôt sur une de nos bornes !</div>
+          <button className="retr-btn retr-btn--outline" onClick={onFinish}>
+            TERMINER
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---------- STYLES ---------- */
+const RETR_CSS = `
+  .retr-root {
+    font-family: ${FONT}; background: ${C.bg}; color: ${C.text}; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 24px;
+  }
+  .retr-spinner {
+    width: 52px; height: 52px; border-radius: 50%;
+    border: 3px solid rgba(255,255,255,0.1); border-top-color: ${C.green};
+    animation: retrSpin 0.9s linear infinite; margin-bottom: 24px;
+  }
+  @keyframes retrSpin { to { transform: rotate(360deg); } }
+
+  .retr-icon { font-size: 44px; margin-bottom: 18px; animation: retrPop .35s ease; }
+  @keyframes retrPop { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+  .retr-title { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
+  .retr-sub { font-size: 12px; color: ${C.muted}; margin-bottom: 26px; max-width: 260px; line-height: 1.6; }
+
+  .retr-btn {
+    background: ${C.green}; color: #07070f; border: none; padding: 15px 26px; border-radius: 14px;
+    font-family: ${FONT}; font-size: 12px; font-weight: 800; letter-spacing: 1px; cursor: pointer;
+  }
+  .retr-btn:hover { opacity: 0.9; }
+  .retr-btn--outline { background: none; border: 1px solid ${C.border}; color: ${C.text}; }
+  .retr-btn--outline:hover { border-color: ${C.green}66; }
 `;
 
 /* ==================== PARTIE 7 — NAVIGATION + ASSEMBLAGE FINAL ==================== */
@@ -445,7 +971,7 @@ const NAV_ITEMS = [
   { id: "settings", icon: "◈", label: "RÉGLAGES" },
 ];
 
-export default function RADDIAApp() {
+function GestionnaireApp({ onExit }) {
   const [user, setUser] = useState(null);
   const [borneIdx, setBorneIdx] = useState(0);
   const [slotsByBorne, setSlotsByBorne] = useState(() => BORNES.map((_, i) => seedSlots(i)));
@@ -498,7 +1024,7 @@ export default function RADDIAApp() {
 
   // Tant qu'aucun utilisateur n'est connecté, on affiche uniquement l'écran de connexion
   if (!user) {
-    return <LoginScreen onLogin={setUser} />;
+    return <LoginScreen onLogin={setUser} onExit={onExit} />;
   }
 
   return (
@@ -536,7 +1062,7 @@ export default function RADDIAApp() {
           <div style={{ fontSize: 10, color: C.muted }}>Connecté en tant que</div>
           <div style={{ fontSize: 12, fontWeight: 700, marginTop: 2 }}>{user.name}</div>
           <div style={{ fontSize: 9, color: C.green, marginTop: 2 }}>{user.email}</div>
-          <button onClick={() => setUser(null)} className="logout-btn">SE DÉCONNECTER</button>
+          <button onClick={() => { setUser(null); onExit && onExit(); }} className="logout-btn">SE DÉCONNECTER</button>
         </div>
       </aside>
 
@@ -551,7 +1077,7 @@ export default function RADDIAApp() {
           <div className="topbar-right">
             <div className="clock">{time.toLocaleTimeString("fr-FR")}</div>
             <div className="online-badge"><span className="online-dot" />EN LIGNE</div>
-            <button onClick={() => setUser(null)} className="logout-btn-mobile" title="Se déconnecter">⏻</button>
+            <button onClick={() => { setUser(null); onExit && onExit(); }} className="logout-btn-mobile" title="Se déconnecter">⏻</button>
           </div>
         </header>
 
@@ -710,3 +1236,42 @@ const CSS = `
     .detail-panel { border-radius: 20px; }
   }
 `;
+
+/* ==================== PARTIE 13 — ROUTEUR RACINE (ASSEMBLAGE FINAL) ==================== */
+// Enchaîne le parcours client : scan -> suivi de charge -> récupération
+function UserFlow({ onExit }) {
+  const [step, setStep] = useState("scan"); // scan | tracking | retrieval
+  const [locker, setLocker] = useState(null);
+
+  if (step === "scan") {
+    return (
+      <QRScanner
+        onScanned={(loc) => { setLocker(loc); setStep("tracking"); }}
+        onBack={onExit}
+      />
+    );
+  }
+  if (step === "tracking") {
+    return (
+      <ChargeTracking
+        borneId={locker.borneId}
+        slotId={locker.slotId}
+        onRetrieve={() => setStep("retrieval")}
+      />
+    );
+  }
+  return <Retrieval slotId={locker.slotId} onFinish={onExit} />;
+}
+
+// Point d'entrée de toute l'app : choisit entre l'univers Gestionnaire et l'univers Utilisateur
+export default function RADDIARoot() {
+  const [mode, setMode] = useState(null); // null | "gestionnaire" | "utilisateur"
+
+  if (mode === null) {
+    return <AppModeSelect onSelect={setMode} />;
+  }
+  if (mode === "gestionnaire") {
+    return <GestionnaireApp onExit={() => setMode(null)} />;
+  }
+  return <UserFlow onExit={() => setMode(null)} />;
+}
