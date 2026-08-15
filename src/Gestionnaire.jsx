@@ -80,6 +80,13 @@ function DeviceBar({ label, count, total, color }) {
 
 /* ==================== PARTIE 6 — VUE RÉGLAGES ==================== */
 
+const NAV_ITEMS = [
+  { id: "dashboard", icon: "⊞", label: "CASIERS" },
+  { id: "alerts", icon: "◉", label: "ALERTES" },
+  { id: "stats", icon: "▣", label: "STATS" },
+  { id: "settings", icon: "◈", label: "RÉGLAGES" },
+];
+
 function GestionnaireApp({ onExit }) {
   const [user, setUser] = usePersistentState("raddia_gestionnaire_user", null);
   const [borneIdx, setBorneIdx] = useState(0);
@@ -345,70 +352,5 @@ const CSS = `
     .detail-panel { border-radius: 20px; }
   }
 `;
-
-/* ============================================================
-   RADDIA — PARTIE 14 : FILET DE SÉCURITÉ (ERROR BOUNDARY)
-   Empêche qu'une erreur JS n'importe où dans l'app ne fasse
-   disparaître toute l'interface (écran noir silencieux).
-   ============================================================ */
-
-// Les Error Boundary DOIVENT être des classes en React — c'est la seule API
-// qui permette d'intercepter une erreur survenue pendant le rendu d'un composant.
-class ErrorBoundary extends Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false };
-  }
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  componentDidCatch(error, info) {
-    // En attendant un vrai backend de supervision, on log au moins dans la console
-    // pour qu'un développeur puisse diagnostiquer via les outils du navigateur.
-    console.error("RADDIA — erreur interceptée :", error, info);
-  }
-
-  handleReload = () => {
-    // Rechargement complet : le moyen le plus fiable de repartir d'un état sain
-    window.location.reload();
-  };
-
-  render() {
-    if (!this.state.hasError) return this.props.children;
-    return (
-      <div className="crash-root">
-        <style>{CRASH_CSS}</style>
-        <div className="crash-icon">⚠</div>
-        <div className="crash-title">Un problème est survenu</div>
-        <div className="crash-sub">
-          L'application a rencontré une erreur inattendue.<br />
-          Vos données n'ont pas été perdues — rechargez la page pour continuer.
-        </div>
-        <button className="crash-btn" onClick={this.handleReload}>RECHARGER LA PAGE</button>
-      </div>
-    );
-  }
-}
-
-const CRASH_CSS = `
-  .crash-root {
-    font-family: ${FONT}; background: ${C.bg}; color: ${C.text}; min-height: 100vh; min-height: 100dvh;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    text-align: center; padding: 24px;
-  }
-  .crash-icon { font-size: 40px; margin-bottom: 18px; color: ${C.amber}; }
-  .crash-title { font-size: 16px; font-weight: 700; margin-bottom: 10px; }
-  .crash-sub { font-size: 12px; color: ${C.muted}; line-height: 1.7; margin-bottom: 26px; max-width: 320px; }
-  .crash-btn {
-    background: ${C.green}; color: #07070f; border: none; padding: 14px 26px; border-radius: 12px;
-    font-family: ${FONT}; font-size: 12px; font-weight: 800; letter-spacing: 1px; cursor: pointer;
-  }
-  .crash-btn:hover { opacity: 0.9; }
-`;
-
-/* ==================== PARTIE 13 — ROUTEUR RACINE (ASSEMBLAGE FINAL) ==================== */
-// Enchaîne le parcours client : scan -> suivi de charge -> récupération
 
 export default GestionnaireApp;
